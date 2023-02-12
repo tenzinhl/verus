@@ -1,4 +1,5 @@
 use quote::quote;
+use std::collections::HashMap;
 
 pub fn attribute_is_variant(
     _attr: proc_macro2::TokenStream,
@@ -10,6 +11,8 @@ pub fn attribute_is_variant(
         _ => panic!("#[is_variant] is only allowed on enums"),
     }
     let struct_name = &s.ast().ident;
+
+    let mut field_to_type = HashMap::<String, &syn::Type>::new();
     let is_impls = s
         .variants()
         .iter()
@@ -28,6 +31,13 @@ pub fn attribute_is_variant(
                             &format!("get_{}_{}", variant_ident_str, field_ident.to_string()),
                             v.ast().ident.span(),
                         );
+
+                        let field_name = field_ident.to_string();
+                        if !field_to_type.contains_key(&field_name) {
+                            field_to_type.insert(field_ident.to_string(), field_ty);
+                        }
+                        let prior_type = field_to_type[&field_name];
+                        assert!(prior_type == field_ty);
 
                         quote! {
                             #[spec]
@@ -77,6 +87,18 @@ pub fn attribute_is_variant(
         })
         .collect::<proc_macro2::TokenStream>();
 
+    let get_impls = field_to_type.iter().map(
+        |(ident, field_ty)| {
+            quote! {
+                #[spec]
+                #[allow(non_snake_case)]
+                pub fn #ident(self) -> #field_ty {
+                    unimplemented!()
+                }
+            }
+        }
+    ).collect::<proc_macro2::TokenStream>();
+
     let generics = &ast.generics;
     quote! {
         #ast
@@ -84,6 +106,8 @@ pub fn attribute_is_variant(
         #[automatically_derived]
         impl#generics #struct_name#generics {
             #is_impls
+
+            #get_impls
         }
     }
 }
